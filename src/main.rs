@@ -1,124 +1,69 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 
-use crossterm::{
-    cursor::{
-        Hide,
-        MoveTo,
-        RestorePosition,
-        SavePosition,
-        MoveToColumn,
-    }, event::{
-        self,
-        Event,
-        KeyCode,
-        KeyEvent,
-    },
-    execute,
-    style::Print,
-    terminal::{
-        self,
-        Clear,
-        ClearType,
-    }
+use std::fmt::Debug;
+
+use::inquire::{
+    Text,
+    Select,
+    validator::Validation,
 };
-use std::{
-    time::Duration,
-    io::stdout,
-    process::exit,
-};
+use reqwest::blocking::get;
+use serde::Deserialize;
 
-struct ExitEvent;
-
-impl Drop for ExitEvent {
-    fn drop(&mut self) {
-        let _ = terminal::disable_raw_mode();
-    }
+#[derive(Deserialize, Debug)]
+struct FabricGameVersion {
+    version: String,
+    stable: bool,
 }
 
-fn readKeyInput() -> KeyCode {
-    loop {
-        if event::poll(Duration::from_millis(500)).unwrap() {
-            return event::read().unwrap().as_key_event().unwrap().code;
-        }
-    }
-}
-
-fn writeToLine(text: &str, position: u16) {
-    execute!(
-        stdout(),
-        MoveToColumn(0),
-        Clear(ClearType::CurrentLine),
-        Print(text),
-        MoveToColumn(position)
-    ).unwrap();
-}
-
-fn textInput(prompt: &str) -> String {
-    println!("{prompt}\r");
-
-    let mut position: u16 = 0;
-    let mut response = String::new();
-
-    loop {
-        match readKeyInput() {
-            KeyCode::Enter => break,
-            KeyCode::Backspace => {
-                response.pop();
-                writeToLine(&response, position);
-            },
-            KeyCode::Up => {
-                position = 0;
-                writeToLine(&response, position);
-            },
-            KeyCode::Down => {
-                position = response.len() as u16;
-                writeToLine(&response, position);
-            },
-            KeyCode::Left => {
-                if position > 0 {
-                    position -= 1;
-                    writeToLine(&response, position);
-                }
-            },
-            KeyCode::Right => {
-                if position < response.len() as u16 {
-                    position += 1;
-                    writeToLine(&response, position);
-                }
-            },
-            KeyCode::Char(key) => {
-                if !key.is_control() {
-                    response.push(key);
-                    position += 1;
-                    writeToLine(&response, position);
-                }
-            },
-            _ => {}
-        }
-    }
-    return response;
-}
-
-fn main () {
-    let _exit_event = ExitEvent;
-
-    terminal::enable_raw_mode().unwrap();
-    println!("{}", textInput("Input your name:"));
-    /*
-    loop {
-        if event::poll(Duration::from_millis(500)).unwrap() {
-            match event::read().unwrap() {
-                Event::Key(KeyEvent { code, ..}) => match code {
-                    KeyCode::Esc | KeyCode::Char('q') => break,
-                    KeyCode::Char(c)   => println!("Key: {c}\r"),
-                    _ => {}
-                }
-                _ => {}
+fn selectChoice<'a>(prompt: &'a str, options: Vec<&'a str>) -> &'a str {
+    return match Select::new(prompt, options)
+        .prompt() {
+            Ok(val) => val,
+            Err(_e) => {
+                return "";
             }
-        }
+        };
+}
+
+fn getVersions(launcher: &str, filter: bool) -> Vec<&str> {
+    match launcher {
+        "Fabric" => {
+            let mut versions: Vec<FabricGameVersion> =
+                get("https://meta.fabricmc.net/v2/versions/game")
+                .unwrap()
+                .json()
+                .unwrap();
+
+            if filter {
+                versions.retain(|v| v.stable);
+            }
+            
+            let mut versionsOnly: Vec<&str> = vec![];
+            versions.iter().for_each(|v| versionsOnly.push(v.version.as_str()));
+            return versionsOnly;
+        },
+        _ => vec![],
     }
-    */
+}
 
+fn main() {
+    let name = match Text::new("Enter server name:")
+        .with_validator(|input: &str| { if input.trim().is_empty() { Ok(Validation::Invalid("Name cannot be empty!".into())) } else { Ok(Validation::Valid) }})
+        .prompt() {
+            Ok(val) => val,
+            Err(_e) => {
+                return;
+            }
+        };
+    
+    let givenLaunchers: Vec<&str> = vec!["Fabric", "Neoforge", "Quilt", "Forge"];
+    let selectedLauncher = selectChoice("Select a launcher:", givenLaunchers);
 
+    let mut versions = getVersions(selectedLauncher, true);
+    versions.insert(0, "Show experimental versions".to_string());
+    let selectedVersion = selectChoice("Select a version:", versions);
+
+    println!("Output:\nName: {}\nLauncher: {}\nVersion: {}", name, selectedLauncher, selectedVersion);
 }
