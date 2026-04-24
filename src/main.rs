@@ -17,18 +17,18 @@ struct FabricGameVersion {
     stable: bool,
 }
 
-fn selectChoice<'a>(prompt: &'a str, options: Vec<&'a str>) -> &'a str {
+fn selectChoice(prompt: &str, options: Vec<String>) -> String {
     return match Select::new(prompt, options)
         .prompt() {
             Ok(val) => val,
             Err(_e) => {
-                return "";
+                return String::new();
             }
         };
 }
 
-fn getVersions(launcher: &str, filter: bool) -> Vec<&str> {
-    match launcher {
+fn getVersions(launcher: &String, filter: bool) -> Vec<String> {
+    match launcher.as_str() {
         "Fabric" => {
             let mut versions: Vec<FabricGameVersion> =
                 get("https://meta.fabricmc.net/v2/versions/game")
@@ -40,9 +40,7 @@ fn getVersions(launcher: &str, filter: bool) -> Vec<&str> {
                 versions.retain(|v| v.stable);
             }
             
-            let mut versionsOnly: Vec<&str> = vec![];
-            versions.iter().for_each(|v| versionsOnly.push(v.version.as_str()));
-            return versionsOnly;
+            versions.into_iter().map(|v| v.version).collect()
         },
         _ => vec![],
     }
@@ -58,10 +56,10 @@ fn main() {
             }
         };
     
-    let givenLaunchers: Vec<&str> = vec!["Fabric", "Neoforge", "Quilt", "Forge"];
+    let givenLaunchers: Vec<String> = vec!["Fabric", "Neoforge", "Quilt", "Forge"].into_iter().map(|s| s.to_string()).collect();
     let selectedLauncher = selectChoice("Select a launcher:", givenLaunchers);
 
-    let mut versions = getVersions(selectedLauncher, true);
+    let mut versions = getVersions(&selectedLauncher, true);
     versions.insert(0, "Show experimental versions".to_string());
     let selectedVersion = selectChoice("Select a version:", versions);
 
