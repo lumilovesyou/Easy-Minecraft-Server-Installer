@@ -226,6 +226,7 @@ dependencies = [
  "inquire",
  "reqwest",
  "serde",
+ "url",
 ]
 
 [[package]]
