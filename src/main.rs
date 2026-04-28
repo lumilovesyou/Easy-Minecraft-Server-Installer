@@ -2,20 +2,22 @@
 #![allow(non_camel_case_types)]
 
 use std::{
-    fmt::Debug,
-    process::exit,
+    fmt::{Debug, format}, fs::{
+        create_dir, exists
+    }, process::exit
 };
 
 use::inquire::{
     Text,
     Select,
+    Confirm,
     validator::Validation,
 };
 use reqwest::blocking::get;
 use serde::Deserialize;
 use serde_json::Value;
 use url::{
-    Url
+    Url,
 };
 
 #[derive(Deserialize, Debug)]
@@ -24,7 +26,7 @@ struct FabricGameVersion {
     stable: bool,
 }
 
-fn selectChoice(prompt: &str, options: Vec<String>) -> String {
+fn optionInput(prompt: &str, options: Vec<String>) -> String {
     return match Select::new(prompt, options)
         .prompt() {
             Ok(val) => val,
@@ -34,7 +36,7 @@ fn selectChoice(prompt: &str, options: Vec<String>) -> String {
         };
 }
 
-fn enterChoice<F>(prompt: &str, condition: F) -> String where F: Fn(&str) -> &str, {
+fn textInput<F>(prompt: &str, condition: F) -> String where F: Fn(&str) -> &str, {
     return match Text::new(prompt)
         .with_validator(|input: &str| { if !condition(input).is_empty() { Ok(Validation::Invalid(condition(input).into())) } else { Ok(Validation::Valid) }})
         .prompt() {
@@ -43,6 +45,12 @@ fn enterChoice<F>(prompt: &str, condition: F) -> String where F: Fn(&str) -> &st
                 exit(0);
             }
         };
+}
+
+fn confirmationInput(prompt: &str) -> bool {
+    return Confirm::new(prompt)
+        .prompt()
+        .unwrap();
 }
 
 fn stringList(list: Vec<&str>) -> Vec<String> {
@@ -84,7 +92,7 @@ fn isValidModpackLink(url: &str) -> &str {
     return "Invalid modpack URL";
 }
 
-//API Stuff
+////API Stuff
 fn getVersions(launcher: &String, filter: bool) -> Vec<String> {
     match launcher.as_str() {
         "Fabric" => {
@@ -105,37 +113,59 @@ fn getVersions(launcher: &String, filter: bool) -> Vec<String> {
 }
 
 fn getURL(url: String) -> Value {
-    let parsedURL = Url::parse(&url).unwrap();
     return get(url).unwrap().json().unwrap();
 }
+////
 
 fn main() {
-    let modpackURL = enterChoice("Enter a modpack URL (optional)", isValidModpackLink);
+    let modpackURL = textInput("Enter a modpack URL (optional)", isValidModpackLink);
     let mut modpackJSON: Value = Value::Null;
     if !modpackURL.is_empty() {
         let parsed = Url::parse(&modpackURL).unwrap();
         let modpackTitle = parsed.path_segments().unwrap().nth(1).unwrap();
         modpackJSON = getURL(format!("https://api.modrinth.com/v2/project/{}", modpackTitle));
     }
-    let mut serverName = enterChoice("Enter the server's name", |input| modpackIsEmpty(input, modpackURL.clone()));
+    let mut serverName = textInput("Enter the server's name", |input| modpackIsEmpty(input, modpackURL.clone()));
     if serverName.is_empty() {
         serverName = modpackJSON["title"].as_str().unwrap().to_string();
     }
     println!("Modpack URL: {}\nServer Name: {}", modpackURL, serverName);
 
-    /*
-    let name = enterChoice("Enter server name:", isEmpty);
+    if modpackURL.is_empty() {
+        //Ask for launcher
+        //Ask for Minecraft version
+    }
 
-    let selectedLauncher = selectChoice("Select a launcher:", stringList(vec!["Fabric", "Neoforge", "Quilt", "Forge"]));
+    let acceptsEULA = confirmationInput("Accept the Minecraft EULA?");
+    let generateScripts = confirmationInput("Generate startup scripts?");
+    
+    let mut folderName = serverName.clone();
+    if exists(&folderName).unwrap() {
+        let mut i = 0;
+        loop {
+            folderName = format!("{} ({})", serverName, i);
+            if !exists(&folderName).unwrap() {
+                break;
+            }
+            i += 1;
+        }
+    }
+
+    create_dir(folderName).unwrap();
+
+    /*
+    let name = textInput("Enter server name:", isEmpty);
+
+    let selectedLauncher = optionInput("Select a launcher:", stringList(vec!["Fabric", "Neoforge", "Quilt", "Forge"]));
 
     let mut versions = getVersions(&selectedLauncher, true);
     versions.insert(0, "Show experimental versions".to_string());
-    let mut selectedVersion = selectChoice("Select a version:", versions);
+    let mut selectedVersion = optionInput("Select a version:", versions);
     if selectedVersion == "Show experimental versions" {
-        selectedVersion = selectChoice("Select a version:", getVersions(&selectedLauncher, false));
+        selectedVersion = optionInput("Select a version:", getVersions(&selectedLauncher, false));
     }
 
-    let modpackLink = enterChoice("Enter a modpack url (empty for manual setup)", isntValidUrl);
+    let modpackLink = textInput("Enter a modpack url (empty for manual setup)", isntValidUrl);
     if !modpackLink.is_empty() {
 
     }
