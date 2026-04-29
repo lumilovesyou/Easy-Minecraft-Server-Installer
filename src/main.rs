@@ -2,9 +2,17 @@
 #![allow(non_camel_case_types)]
 
 use std::{
-    fmt::{Debug, format}, fs::{
-        create_dir, exists
-    }, process::exit, vec
+    fmt::Debug,
+    fs::{
+        File,
+        create_dir,
+        create_dir_all,
+        exists,
+        write,
+    },
+    io::Write,
+    process::exit,
+    vec,
 };
 
 use::inquire::{
@@ -16,9 +24,7 @@ use::inquire::{
 use reqwest::blocking::get;
 use serde::Deserialize;
 use serde_json::Value;
-use url::{
-    Url,
-};
+use url::Url;
 
 #[derive(Deserialize, Debug)]
 struct FabricGameVersion {
@@ -26,6 +32,11 @@ struct FabricGameVersion {
     stable: bool,
 }
 
+fn stringList(list: Vec<&str>) -> Vec<String> {
+    list.into_iter().map(|s| s.to_string()).collect()
+}
+
+////Input methods
 fn optionInput(prompt: &str, options: Vec<String>) -> String {
     return match Select::new(prompt, options)
         .prompt() {
@@ -52,18 +63,9 @@ fn confirmationInput(prompt: &str) -> bool {
         .prompt()
         .unwrap();
 }
+////
 
-fn stringList(list: Vec<&str>) -> Vec<String> {
-    list.into_iter().map(|s| s.to_string()).collect()
-}
-
-fn isEmpty(text: &str) -> &str {
-    if text.is_empty() {
-        return "Cannot be empty";
-    }
-    return "";
-}
-
+////Validators
 fn modpackIsEmpty(text: &str, doModpack: bool) -> &str {
     if text.is_empty() && !doModpack {
         return "Cannot be empty";
@@ -90,6 +92,7 @@ fn isValidModpackLink(url: &str) -> &str {
     }
     return "Invalid modpack URL";
 }
+////
 
 ////API Stuff
 fn getMinecraftVersions(launcher: &String, filter: bool) -> Vec<String> {
@@ -126,7 +129,7 @@ fn getModpackMinecraftVersions(url: &String) -> Vec<String> {
     }
 }
 
-fn getModpackVersion(url: &str, minecraftVersion: String) -> (Vec<String>, Vec<String>) {
+fn getModpackVersion(url: &str, minecraftVersion: &str) -> (Vec<String>, Vec<String>) {
     match getModpackHost(url).as_str() {
         "modrinth.com" => {
             let modpack: Value = getURL(format!("https://api.modrinth.com/v2/project/{}/version?game_versions=[\"{}\"]", getModpackName(url), minecraftVersion));
@@ -141,7 +144,9 @@ fn getModpackVersion(url: &str, minecraftVersion: String) -> (Vec<String>, Vec<S
         _ => { (vec![], vec![]) }
     }
 }
+////
 
+////URL Stuff
 fn getModpackHost(url: &str) -> String {
     let parsed = Url::parse(url).unwrap();
     parsed.host_str().unwrap().to_owned()
@@ -157,7 +162,25 @@ fn getURL(url: String) -> Value {
 }
 ////
 
+////Launchers stuff
+fn downloadLauncher(launcher: &str, version: String, path: &str) {
+    match launcher {
+        "fabric" => {
+            let loaderVersionPart = getURL(format!("https://meta.fabricmc.net/v2/versions/loader/{}", version)).as_array().unwrap().first().unwrap()["loader"].clone();
+            let loaderVersion = loaderVersionPart["version"].as_str().unwrap();
+            let installerVersionPart = getURL("https://meta.fabricmc.net/v2/versions/installer".to_string()).as_array().unwrap().first().unwrap()["version"].clone();
+            let installerVersion = installerVersionPart.as_str().unwrap();
+            //https://meta.fabricmc.net/v2/versions/loader/{mc_version}/{loader_version}/{installer_version}/server/jar
+            let jarBytes = get(format!("https://meta.fabricmc.net/v2/versions/loader/{}/{}/{}/server/jar", version, loaderVersion, installerVersion)).unwrap().bytes().unwrap();
+            write(format!("{}/server.jar", path), jarBytes).unwrap();
+        },
+        _ => {}
+    }
+}
+////
+
 fn main() {
+    //Modpack
     let modpackURL = textInput("Enter a modpack URL (optional)", isValidModpackLink);
     let doModpack = !modpackURL.is_empty();
     let mut modpackJSON: Value = Value::Null;
@@ -166,30 +189,36 @@ fn main() {
         modpackJSON = getURL(format!("https://api.modrinth.com/v2/project/{}", getModpackName(&modpackURL)));
     }
 
+
+    //Name
     let mut serverName = textInput("Enter the server's name", |input| modpackIsEmpty(input, doModpack));
     if serverName.is_empty() {
         serverName = modpackJSON["title"].as_str().unwrap().to_string();
     }
 
+    //Selection launcher/versions
+    let mut selectedMinecraftVersion = String::new();
     if !doModpack {
         let selectedLauncher = optionInput("Select a launcher:", stringList(vec!["Fabric", "Neoforge", "Quilt", "Forge"]));
 
         let mut versions = getMinecraftVersions(&selectedLauncher, true);
         versions.insert(0, "Show experimental versions".to_string());
-        let mut selectedVersion = optionInput("Select a version:", versions);
-        if selectedVersion == "Show experimental versions" {
-            selectedVersion = optionInput("Select a version:", getMinecraftVersions(&selectedLauncher, false));
+        let mut selectedMinecraftVersion = optionInput("Select a version:", versions);
+        if selectedMinecraftVersion == "Show experimental versions" {
+            selectedMinecraftVersion = optionInput("Select a version:", getMinecraftVersions(&selectedLauncher, false));
         }
     } else {
-        let selectedMinecraftVersion = optionInput("Selection a Minecraft version:", getModpackMinecraftVersions(&modpackURL));
-        let (modpackVersions, modpackIDs) =  getModpackVersion(&modpackURL, selectedMinecraftVersion);
+        selectedMinecraftVersion = optionInput("Selection a Minecraft version:", getModpackMinecraftVersions(&modpackURL));
+        let (modpackVersions, modpackIDs) =  getModpackVersion(&modpackURL, &selectedMinecraftVersion);
         let modpackVersions: Vec<String> = modpackVersions.into_iter().zip(modpackIDs).map(|(version, id)| format!("{} ({})", version, id)).collect();
         let selectedModpackVersion = optionInput("Selection a Modpack release:", modpackVersions);
     }
 
+    //Quick files
     let acceptsEULA = confirmationInput("Accept the Minecraft EULA?");
     let generateScripts = confirmationInput("Generate startup scripts?");
     
+    //Generate valid folder name
     let mut folderName = serverName.clone();
     if exists(&folderName).unwrap() {
         let mut i = 0;
@@ -202,8 +231,28 @@ fn main() {
         }
     }
 
-    create_dir(folderName).unwrap();
+    //Create folder
+    create_dir_all(format!("{}/mods", folderName)).unwrap();
+
+    //Download launcher
+    downloadLauncher("fabric", selectedMinecraftVersion, &folderName);
+
+    //Create quick files
+    if acceptsEULA {
+        let mut minecraftEULA = File::create(format!("{}/eula.txt", folderName)).unwrap();
+        minecraftEULA.write(b"#https://aka.ms/MinecraftEULA\neula=true").unwrap();
+    }
+
 }
+
+////To-do:
+//Download launcher
+//(If modpack) Download modpack file
+//(If modpack) Download modpack mods
+//Generate launch scripts
+//Add NeoForge, Forge, and Quilt support
+//Add CurseForge support
+////
 
 ////Process:
 //Ask for Modpack URL
